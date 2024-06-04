@@ -1,0 +1,45 @@
+on:
+  push:
+    branches:
+    - dev
+
+name: Build and Deploy to Cloud Run
+environment: dev
+
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # Add "id-token" with the intended permissions.
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - id: 'auth'
+      uses: 'google-github-actions/auth@v1'
+      
+
+    # Setup gcloud CLI
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+
+
+    # Setup gcloud CLI
+    - name: Deploy to Cloud Run
+      run: |-
+        gcloud functions deploy  function-1 
+        --memory=512MB
+        --region=asia-south1 
+        --gen2 
+        --runtime python310 
+        --trigger-http 
+        --allow-unauthenticated
+        --entry-point=main
+        --source=.
+        --project_id: ${{ secrets.PROJECT_ID }}
+        

@@ -33,7 +33,7 @@ jobs:
     - name: Deploy to Cloud Run
       run: |-
         gcloud functions deploy  function-1 
-        --memory=512MB
+        --memory=1024MB
         --region=asia-south1 
         --gen2 
         --runtime python310 

@@ -8,50 +8,8 @@ from google.cloud import bigquery
 import pandas_gbq as gbq
 from prophet import Prophet
 
-@functions_framework.http
 
-def extract_data():
-    try:
-        url = "https://air-quality.p.rapidapi.com/history/airquality"
-        lat, lon = 18.50956983949341, 73.85882813593227
-        querystring = {"lon":lon,"lat":lat}
-
-        headers = {
-            "x-rapidapi-key": "572e8dc2ffmshe32f9c0ffbf7f45p1e5487jsn997315c6051b",
-             "x-rapidapi-host": "air-quality.p.rapidapi.com"
-        }
-
-        response = requests.get(url, headers=headers, params=querystring)
-        data = response.json()
-        df = pd.json_normalize(data)
-        df = df.explode('data', ignore_index=True)
-        df = df.join(pd.json_normalize(df['data'])).drop('data', axis=1)
-        return df
-    except Exception as e:
-        print(e)
-        pass
-
-def transform_data():
-    try:
-        df=extract_data()
-        df=df.fillna('')
-        df=df.drop_duplicates()
-        return df
-    except Exception as e:
-        print(e)
-        pass
-
-def load_data():
-    try:
-        df=transform_data()
-        insert_data=df.astype(str)
-        gbq.to_gbq(insert_data, 'testing.AirQulity', 'fenixwork-projects', if_exists='append')
-    except Exception as e:
-        print(e)
-        pass
-    
-
-def get_data():
+def get_air_data():
     try:
         # data=load_data()
         client = bigquery.Client()
@@ -59,55 +17,77 @@ def get_data():
         dataset_id = "testing"
 
         dataset_ref = bigquery.DatasetReference(project, dataset_id)
-        table_ref = dataset_ref.table("AirQulity")
+        table_ref = dataset_ref.table("Air_Qulity")
         table = client.get_table(table_ref)
 
         df = client.list_rows(table).to_dataframe()
-        df=df.drop_duplicates(subset=['timestamp_local'],keep='last')
         return df
     except Exception as e:
         print(e)
         pass
 
-def prediction_data():
+def air_qulity_per_month():
     try:
-        df=get_data()
-        df['ds']=df['timestamp_local']
-        df['y']=df['aqi']
-        df1=df[['ds','y']]
-        m = Prophet()
-        m.fit(df1)
-        future = m.make_future_dataframe(periods=365,freq='H')
-        forecast = m.predict(future)
-        return forecast.to_dict('list')
-    except Exception as e:
-        print(e)
-        dfx=[]
-        return dfx
-     
-def get_full_data(query):
-    try:
-        query_lst=[]
-        query_lst.append(query.lower())
-        df=get_data()
+        df=get_air_data()
         df=df.fillna('')
-        df['city_name']=df["city_name"].map(lambda x: x.lower())
-        df=df.query('city_name in @query_lst')
-        return df.to_dict('list')
+        df['Date']=pd.to_datetime(df['Date'])
+        df['AQI']=df['AQI'].astype(float)
+        d={}
+        df=df[df.AQI!='']
+        for key,grp in df.groupby('Location'):
+            a=grp.groupby(grp['Date'].dt.month)['AQI'].mean()
+            d[key]=a
+        monthly_avg=pd.DataFrame(d)
+        monthly_avg.index.name='Months'
+        months={1:'Jan',2:'Feb',3:'Mar',4:'Apr',5:'May',6:'June',7:'July',8:'Aug',9:'Sep',10:'Oct',11:'Nov',12:'Dec'}
+        monthly_avg.reset_index(inplace=True)
+        monthly_avg['Months'].replace(months,inplace=True)
+        monthly_avg.set_index('Months',inplace=True)
+        # monthly_avg['Month']=''
+        # month_dict={0:'Jan',1:'Feb',2:'Mar',3:'Apr',4:'May',5:'June',6:'July',7:'Aug',8:'Sep',9:'Oct',10:'Nov',11:'Dec'}
+        # for k,v in month_dict.items():
+        #     monthly_avg['Month'].iloc[k]=v
+        return monthly_avg.to_dict('list')
     except Exception as e:
-        print(e)
-        dfx=[]
-        return dfx
+        print("Error in air_qulity_per_month",e) 
+        return []
+
+def take_first_date(x):
+    if str(x).endswith('01'):
+        return x
+    else:
+        return ''
+
+def future_air_Predict():
+    try:
+        dfy=get_air_data()
+        dfy=dfy[dfy.AQI!='']
+        dfy = dfy[['Date', 'AQI']]
+        predict_ip_dfx = dfy.rename(columns={'Date':'ds', 'AQI':'y'})
+        model = Prophet()
+        model.fit(predict_ip_dfx)
+        future = model.make_future_dataframe(periods=730)
+        forecast = model.predict(future)
+        forecast['date'] = forecast['ds'].dt.date
+        forecast['date']=forecast['date'].apply(take_first_date)
+        forecast=forecast[forecast.date!='']
+        forecast['date']=forecast['date'].astype('datetime64[ns]')
+        forecast['year'] = forecast['date'].dt.year
+        yearly_trend = forecast.groupby('year')['trend'].sum().reset_index()
+        return yearly_trend.to_dict('list')
+    except Exception as e:
+        print("Error in future_air_Predict",e) 
+        return []
+
 
 def air_quality(request):
     final_result=[]
     final_dict=dict()
     try:
-        query=request.json['query']
-        data=get_full_data(query)
+        data=air_qulity_per_month()
         final_dict['full_dataset']=data
-        # prediction=prediction_data()
-        # final_dict['prediction']=prediction
+        prediction=future_air_Predict()
+        final_dict['prediction']=prediction
         final_result.append(final_dict)
     except Exception as e:
         print(e)
@@ -118,97 +98,79 @@ def air_quality(request):
     return resp
 
 
-########################
-def extract_data_traffic():
+######################## electricity #####################
+
+def get_data_electricity():
     try:
-        url = "https://waze.p.rapidapi.com/alerts-and-jams"
-        bottom_left = '18.405358059520015, 73.73454530741854'
-        top_right = '18.63714281319877, 73.99409729919435'
-        querystring = {"bottom_left":bottom_left,"top_right":top_right,"max_alerts":"100000","max_jams":"100000"}
-
-        headers = {
-            "x-rapidapi-key": "572e8dc2ffmshe32f9c0ffbf7f45p1e5487jsn997315c6051b",
-            "x-rapidapi-host": "waze.p.rapidapi.com"
-        }
-
-        response = requests.get(url, headers=headers, params=querystring)
-
-        data = response.json()
-
-        df = pd.json_normalize(data)
-        df = df.explode('data.jams', ignore_index=True)
-        df = pd.json_normalize(df['data.jams'])
-        df = df.explode('line_coordinates', ignore_index=True)
-        dfx = pd.json_normalize(df['line_coordinates'])
-        df = df.join(dfx).drop('line_coordinates', axis=1)
-        return df
-    except Exception as e:
-        print(e)
-        pass
-
-def transform_data_traffic():
-    try:
-        df=extract_data_traffic()
-        df=df.fillna('')
-        df=df.drop_duplicates()
-        return df
-    except Exception as e:
-        print(e)
-        pass
-
-def load_data_traffic():
-    try:
-        df=transform_data_traffic()
-        insert_data=df.astype(str)
-        gbq.to_gbq(insert_data, 'testing.Traffic', 'fenixwork-projects', if_exists='append')
-    except Exception as e:
-        print(e)
-        pass
-    
-
-def get_data_traffic():
-    try:
-        # data=load_data_traffic()
         client = bigquery.Client()
         project = "fenixwork-projects"
         dataset_id = "testing"
 
         dataset_ref = bigquery.DatasetReference(project, dataset_id)
-        table_ref = dataset_ref.table("Traffic")
+        table_ref = dataset_ref.table("Electricity")
         table = client.get_table(table_ref)
 
         df = client.list_rows(table).to_dataframe()
-        df=df.drop_duplicates(subset=['jam_id','publish_datetime_utc','update_datetime_utc'],keep='last')
+        # df=df.drop_duplicates(subset=['Year'],keep='last')
         return df
     except Exception as e:
         print(e)
         pass
     
-def get_full_data_traffic(query):
+def get_full_data_electricity():
     try:
-        query_lst=[]
-        query_lst.append(query.lower())
-        df=get_data_traffic()
+        df=get_data_electricity()
         df=df.fillna('')
-        print(df.columns)
-        df['city']=df["city"].map(lambda x: x.lower())
-        df=df.query('city in @query_lst')
         return df.to_dict('list')
     except Exception as e:
         print(e)
         dfx=[]
         return dfx
+    
+def monthly_data():
+    try:
+        client = bigquery.Client()
+        project = "fenixwork-projects"
+        dataset_id = "testing"
+        dataset_ref = bigquery.DatasetReference(project, dataset_id)
+        table_ref = dataset_ref.table("Monthly_Electricity")
+        table = client.get_table(table_ref)
+        df = client.list_rows(table).to_dataframe()
+        return df
+    except Exception as e:
+        print(e)
+        pass
 
+def future_Predict(dfy):
+    try:
+        dfy = dfy[['Date', 'Total_Consumption']]
+        predict_ip_dfx = dfy.rename(columns={'Date':'ds', 'Total_Consumption':'y'})
+        model = Prophet()
+        model.fit(predict_ip_dfx)
+        future = model.make_future_dataframe(periods=730)
+        forecast = model.predict(future)
+        forecast['date'] = forecast['ds'].dt.date
+        forecast['date']=forecast['date'].apply(take_first_date)
+        forecast=forecast[forecast.date!='']
+        forecast['date']=forecast['date'].astype('datetime64[ns]')
+        forecast['year'] = forecast['date'].dt.year
+        yearly_trend = forecast.groupby('year')['trend'].sum().reset_index()
+        return yearly_trend.to_dict('list')
+    except Exception as e:
+        print("Error in future_predict",e)
+        pass
 
-def traffic(request):
+def electricity(request):
     final_result=[]
     final_dict=dict()
     try:
-        query=request.json['query']
-        data=get_full_data_traffic(query)
+        data=get_full_data_electricity()
         final_dict['full_dataset']=data
-        # prediction=prediction_data()
-        # final_dict['prediction']=prediction
+        df=get_data_electricity()
+        df=df.fillna('')
+        monthly_df=monthly_data()
+        prediction=future_Predict(monthly_df)
+        final_dict['prediction']=prediction
         final_result.append(final_dict)
     except Exception as e:
         print(e)
@@ -224,7 +186,7 @@ def main(request):
     if request.method == 'OPTIONS':
         headers = {
             'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST',
+            'Access-Control-Allow-Methods': 'GET',
             'Access-Control-Allow-Headers': 'Content-Type',
             'Access-Control-Max-Age': '3600'
         }
@@ -235,5 +197,5 @@ def main(request):
 
     if (path == "/air_quality"):
         return air_quality(request)
-    elif (path == "/traffic"):
-        return traffic(request)
+    elif (path == "/electricity"):
+        return electricity(request)

@@ -75,6 +75,8 @@ def future_air_Predict():
         forecast['year'] = forecast['date'].dt.year
         yearly_trend = forecast.groupby('year')['trend'].sum().reset_index()
         yearly_trend['trend']=yearly_trend['trend']/12
+	year_lst=[2019,2020,2021,2022,2023,2024,2025]
+        yearly_trend=yearly_trend.query('year in @year_lst')
         return yearly_trend.to_dict('list')
     except Exception as e:
         print("Error in future_air_Predict",e) 
